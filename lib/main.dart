@@ -41,7 +41,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Auto SMS Airtel/NetMlay',
+      title: 'Auto SMS',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
@@ -123,7 +123,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
       _isInitializing = false;
       _isListening = true;
       _statusMessage =
-          'Écoute active: Airtel OU NetMlay (automatique, foreground + background).';
+          'Écoute active: (automatique, foreground + background).';
     });
 
     if (processedCount > 0) {
@@ -148,7 +148,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Nouveau SMS Airtel/NetMlay sauvegardé automatiquement.'),
+        content: Text('Nouveau SMS sauvegardé automatiquement.'),
         backgroundColor: Colors.blue,
       ),
     );
@@ -177,7 +177,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Auto SMS Airtel/NetMlay')),
+      appBar: AppBar(title: const Text('Auto SMS')),
       body: Column(
         children: [
           Container(
@@ -220,7 +220,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
                 : _savedMessages.isEmpty
                 ? const Center(
                     child: Text(
-                      'Aucun SMS correspondant (Airtel OU NetMlay) sauvegardé.',
+                      'Aucun SMS correspondant votre filtre sauvegardé.',
                       textAlign: TextAlign.center,
                     ),
                   )

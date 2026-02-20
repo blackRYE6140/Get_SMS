@@ -17,7 +17,7 @@ class DatabaseHelper {
 
   Future<Database> _initDatabase() async {
     final path = await getDatabasesPath();
-    final databasePath = join(path, 'airtel_netmlay_messages.db');
+    final databasePath = join(path, 'messages.db');
 
     return await openDatabase(
       databasePath,

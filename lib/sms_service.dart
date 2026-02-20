@@ -10,7 +10,7 @@ class SmsService {
     : _telephony = telephony ?? Telephony.instance;
 
   static const String targetSender = 'Airtel';
-  static const String targetKeyword = 'bonjour';
+  static const String targetKeyword = '1go';
 
   final Telephony _telephony;
 
