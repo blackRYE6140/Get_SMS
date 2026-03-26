@@ -73,6 +73,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen>
   }
 
   Future<void> _initializeAutomaticRecovery() async {
+    await _ensureKeepAliveService();
     _recoveredFromNativeQueue = await _flushNativePendingSms();
 
     await _loadSavedMessages();
@@ -107,7 +108,8 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen>
         await _dbHelper.saveMessage(
           address: message['address']?.toString() ?? '',
           body: message['body']?.toString() ?? '',
-          date: message['date']?.toString() ?? DateTime.now().toIso8601String(),
+          date:
+              message['date']?.toString() ?? DateTime.now().toIso8601String(),
         );
         processedCount++;
       }
@@ -136,6 +138,18 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen>
           backgroundColor: Colors.green,
         ),
       );
+    }
+  }
+
+  Future<void> _ensureKeepAliveService() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    try {
+      await _backgroundSmsChannel.invokeMethod<void>('startKeepAliveService');
+    } catch (e) {
+      debugPrint('Impossible de demarrer le service keep-alive: $e');
     }
   }
 

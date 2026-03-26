@@ -1,144 +1,188 @@
 # GET_SMS (`get_smm`)
 
-Application Flutter Android qui capture des SMS entrants, les sauvegarde en
-SQLite local, puis affiche les messages qui correspondent a un filtre.
+Application Flutter Android qui capture des SMS entrants, sauvegarde en SQLite local,
+et affiche automatiquement les messages qui correspondent a un filtre.
 
-## Objectif
+Ce README donne une configuration complete, etape par etape.
 
-- Capturer automatiquement les SMS entrants.
-- Sauvegarder en base locale avec anti-doublon.
-- Afficher automatiquement les messages filtres dans l'app.
-- Tenter de conserver les SMS captures meme si l'app est fermee.
+## 1) Objectif
 
-## Filtre actif
+- Garder les SMS cibles meme si le SMS est supprime rapidement dans l'app Messages.
+- Supporter 2 cas:
+  - app ouverte,
+  - app en arriere-plan ou retiree des recents.
 
-Le filtre est defini dans `lib/sms_service.dart`:
+## 2) Prerequis
 
-- `targetSender = 'salama'`
-- `targetKeyword = 'salama'`
+- Flutter SDK installe (`flutter --version`)
+- Android SDK + ADB
+- Un telephone Android reel (important pour les tests SMS)
+- Carte SIM active pour envoyer/recevoir des SMS
 
-Un message est conserve dans la liste affichee si:
+Verification rapide:
 
-- `address` contient `targetSender`, OU
-- `body` contient `targetKeyword`.
+```bash
+flutter doctor -v
+adb devices
+```
 
-## Fonctionnalites implementees
+## 3) Installation projet
 
-- Permission SMS runtime (`permission_handler`).
-- Lecture initiale de la boite de reception SMS (`another_telephony`).
-- Ecoute SMS en app ouverte (foreground).
-- Receiver Android natif pour reception en arriere-plan.
-- File de secours native (`SharedPreferences`) en cas d'echec d'ecriture DB.
-- Flush automatique de la file native au prochain lancement Flutter.
-- Stockage SQLite avec index et index unique anti-doublon.
-- Rafraichissement automatique de l'ecran (timer + resume app).
-
-## Architecture
-
-### Flutter
-
-- `lib/main.dart`
-  - Initialisation globale de l'ecran.
-  - Flush de la file native via `MethodChannel`.
-  - Synchronisation initiale des SMS existants.
-  - Listener foreground + auto-refresh UI.
-  - Filtrage final applique sur les messages lus en DB.
-
-- `lib/sms_service.dart`
-  - Permission SMS.
-  - Lecture inbox.
-  - Ecoute foreground des nouveaux SMS.
-  - Regle de filtrage (`isMatchingMessage`).
-
-- `lib/database_helper.dart`
-  - Gestion SQLite `messages.db`.
-  - Migration schema v2.
-  - Anti-doublon par index unique `(address, body, date)`.
-
-### Android natif (Kotlin)
-
-- `android/app/src/main/kotlin/com/example/get_smm/IncomingSmsReceiver.kt`
-  - Recoit `SMS_RECEIVED`.
-  - Enqueue d'abord le SMS dans la file de secours.
-  - Tente ensuite l'ecriture immediate dans `messages.db`.
-  - Si succes, retire le message de la file.
-
-- `android/app/src/main/kotlin/com/example/get_smm/PendingSmsStore.kt`
-  - Stocke les SMS en attente dans `SharedPreferences`.
-  - Fournit `flushToDatabase()`.
-
-- `android/app/src/main/kotlin/com/example/get_smm/SmsDatabaseHelper.kt`
-  - Ecriture SQLite native dans la meme base `messages.db`.
-
-- `android/app/src/main/kotlin/com/example/get_smm/MainActivity.kt`
-  - Expose `MethodChannel get_smm/background_sms`.
-  - Methode `flushPendingSms` appelee depuis Flutter.
-
-### Manifest Android
-
-Fichier: `android/app/src/main/AndroidManifest.xml`
-
-- Permissions:
-  - `android.permission.READ_SMS`
-  - `android.permission.RECEIVE_SMS`
-- Receiver:
-  - `.IncomingSmsReceiver`
-  - action `android.provider.Telephony.SMS_RECEIVED`
-
-## Base de donnees
-
-DB: `messages.db`
-
-Table `messages`:
-
-- `id INTEGER PRIMARY KEY AUTOINCREMENT`
-- `address TEXT NOT NULL`
-- `body TEXT NOT NULL`
-- `date TEXT NOT NULL`
-- `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
-
-Indexes:
-
-- `idx_address` sur `address`
-- `idx_date` sur `date`
-- `idx_unique_message` unique sur `(address, body, date)`
-
-## Flux de fonctionnement
-
-### 1) Lancement de l'app
-
-- Flutter appelle `flushPendingSms` (MethodChannel).
-- Les SMS en file native sont reinjectes dans SQLite.
-- L'app charge la DB, demande permission SMS, sync inbox,
-  puis demarre l'ecoute foreground.
-
-### 2) SMS recu en app ouverte
-
-- `another_telephony` declenche `onNewMessage`.
-- Message sauvegarde en DB.
-- UI rafraichie automatiquement.
-
-### 3) SMS recu en app fermee
-
-- `IncomingSmsReceiver` est notifie.
-- Message queue + tentative d'ecriture DB immediate.
-- Au prochain lancement, toute file restante est flush en DB.
-- L'ecran affiche ensuite les messages qui passent le filtre.
-
-## Prerequis
-
-- Flutter SDK installe.
-- Android SDK / device Android reel.
-- Permission SMS accordee a l'app.
-
-## Installation et execution
+1. Ouvrir le dossier du projet.
+2. Installer les dependances.
+3. Lancer l'app en debug.
 
 ```bash
 flutter pub get
 flutter run
 ```
 
-## Verification technique
+## 4) Configuration du filtre SMS
+
+Fichier: `lib/sms_service.dart`
+
+Modifier ces constantes:
+
+```dart
+static const String targetSender = 'salama';
+static const String targetKeyword = 'salama';
+```
+
+Regle de filtre:
+
+- le SMS est conserve si `address` contient `targetSender`, OU
+- le SMS est conserve si `body` contient `targetKeyword`.
+
+## 5) Configuration Android (deja incluse dans ce repo)
+
+### 5.1 Permissions manifeste
+
+Fichier: `android/app/src/main/AndroidManifest.xml`
+
+Permissions declarees:
+
+- `android.permission.READ_SMS`
+- `android.permission.RECEIVE_SMS`
+- `android.permission.RECEIVE_BOOT_COMPLETED`
+- `android.permission.FOREGROUND_SERVICE`
+- `android.permission.FOREGROUND_SERVICE_DATA_SYNC`
+
+### 5.2 Composants Android declares
+
+Toujours dans `android/app/src/main/AndroidManifest.xml`:
+
+- Receiver SMS: `.IncomingSmsReceiver`
+- Receiver boot/update: `.BootReceiver`
+- Receiver relance service: `.KeepAliveRestartReceiver`
+- Service keep-alive: `.SmsKeepAliveService`
+
+## 6) Premiere execution (obligatoire)
+
+1. Ouvrir l'app une premiere fois.
+2. Accepter la permission SMS quand Android la demande.
+3. Verifier que le statut de l'app passe en ecoute active.
+4. Verifier qu'une notification persistante du service keep-alive est visible.
+
+Sans cette premiere ouverture, la capture en arriere-plan ne sera pas fiable.
+
+## 7) Configuration telephone pour fiabilite background
+
+Selon la marque (Xiaomi, Oppo, Huawei, etc.), activer aussi:
+
+1. Autoriser l'app a demarrer automatiquement (auto start).
+2. Exclure l'app de l'optimisation batterie.
+3. Autoriser activite en arriere-plan.
+4. Ne pas faire "Force stop" sauf pour test limite.
+
+## 8) Architecture fonctionnelle
+
+### Flutter
+
+- `lib/main.dart`
+  - demarre le keep-alive natif,
+  - flush la file native,
+  - synchronise inbox,
+  - ecoute foreground,
+  - rafraichit UI automatiquement.
+
+- `lib/sms_service.dart`
+  - permission SMS,
+  - lecture inbox,
+  - listener foreground,
+  - filtrage metier.
+
+- `lib/database_helper.dart`
+  - DB `messages.db`,
+  - table `messages`,
+  - index unique anti-doublon `(address, body, date)`.
+
+### Android natif
+
+- `android/app/src/main/kotlin/com/example/get_smm/IncomingSmsReceiver.kt`
+  - recoit `SMS_RECEIVED`,
+  - met en queue de secours,
+  - tente sauvegarde SQLite immediate.
+
+- `android/app/src/main/kotlin/com/example/get_smm/PendingSmsStore.kt`
+  - queue `SharedPreferences` en cas d'echec temporaire.
+
+- `android/app/src/main/kotlin/com/example/get_smm/SmsDatabaseHelper.kt`
+  - ecriture native dans `messages.db`.
+
+- `android/app/src/main/kotlin/com/example/get_smm/SmsKeepAliveService.kt`
+  - foreground service persistant,
+  - relance apres suppression de tache.
+
+- `android/app/src/main/kotlin/com/example/get_smm/KeepAliveRestartReceiver.kt`
+  - redemarre le service via alarme interne.
+
+- `android/app/src/main/kotlin/com/example/get_smm/BootReceiver.kt`
+  - relance keep-alive au boot et apres update APK.
+
+- `android/app/src/main/kotlin/com/example/get_smm/MainActivity.kt`
+  - expose le `MethodChannel get_smm/background_sms`.
+
+## 9) Flux complet de sauvegarde
+
+### Cas A - App ouverte
+
+1. SMS arrive.
+2. Listener Flutter capte le message.
+3. Sauvegarde SQLite immediate.
+4. UI s'actualise automatiquement.
+
+### Cas B - App en arriere-plan / retiree des recents
+
+1. SMS arrive.
+2. `IncomingSmsReceiver` capte le message.
+3. Message mis en queue de secours.
+4. Tentative de sauvegarde SQLite immediate.
+5. Si echec, le message reste en queue puis sera flush au prochain lancement.
+
+## 10) Tests fonctionnels etape par etape
+
+### Test 1 - Foreground (doit passer)
+
+1. Laisser l'app ouverte.
+2. Envoyer un SMS qui match le filtre.
+3. Verifier apparition sans redemarrage.
+
+### Test 2 - App retiree des recents (doit passer)
+
+1. Ouvrir app une fois (permission accordee).
+2. Verifier notification keep-alive visible.
+3. Retirer app des recents (pas force stop).
+4. Envoyer un SMS qui match le filtre.
+5. Supprimer vite le SMS depuis Messages.
+6. Rouvrir app et verifier que le SMS est sauvegarde.
+
+### Test 3 - Force stop Android (limite normale)
+
+1. Parametres Android > Applications > `get_smm` > Forcer l'arret.
+2. Envoyer un SMS qui match.
+3. Resultat attendu: pas de capture tant que l'app n'est pas relancee manuellement.
+
+## 11) Verification technique
 
 ```bash
 flutter analyze
@@ -146,46 +190,22 @@ cd android
 ./gradlew :app:compileDebugKotlin
 ```
 
-## Validation fonctionnelle conseillee
+## 12) Debug rapide
 
-### Test A: foreground
-
-1. Ouvrir l'app.
-2. Envoyer un SMS qui matche le filtre.
-3. Verifier apparition auto sans redemarrage.
-
-### Test B: background
-
-1. Ouvrir l'app une fois (permission SMS accordee).
-2. Fermer l'app normalement (pas Force stop).
-3. Envoyer un SMS qui matche.
-4. Supprimer le SMS rapidement depuis l'app Messages.
-5. Rouvrir l'app et verifier la presence du message.
-
-## Limitations Android importantes
-
-- Si l'utilisateur fait `Force stop`, Android bloque les receivers tant que
-  l'app n'est pas relancee manuellement.
-- Certains constructeurs (MIUI/ColorOS/EMUI, etc.) limitent fortement
-  l'execution en arriere-plan.
-- Il faut desactiver les optimisations batterie pour ameliorer la fiabilite.
-
-## Debug rapide (si background ne marche pas)
-
-### 1) Verifier receiver dans le manifeste merge
+### 12.1 Verifier manifeste merge
 
 ```bash
-rg "IncomingSmsReceiver" build/app/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
+rg "IncomingSmsReceiver|SmsKeepAliveService|KeepAliveRestartReceiver|BootReceiver"   build/app/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
 ```
 
-### 2) Logs runtime Android
+### 12.2 Lire les logs
 
 ```bash
 adb logcat -c
-adb logcat | grep -E "IncomingSmsReceiver|Background SMS capture failed|flushPendingSms"
+adb logcat | grep -E "IncomingSmsReceiver|SmsKeepAliveService|PendingSmsStore|FLUSH_PENDING_SMS_FAILED"
 ```
 
-### 3) Rebuild propre
+### 12.3 Rebuild propre
 
 ```bash
 flutter clean
@@ -193,13 +213,28 @@ flutter pub get
 flutter run
 ```
 
-## Dependances principales
+## 13) Probleme frequents
+
+### Probleme: marche app ouverte mais pas app retiree
+
+- verifier notification keep-alive visible,
+- verifier options batterie/auto-start du telephone,
+- verifier que ce n'est pas un force stop.
+
+### Probleme: SMS absent apres reopen
+
+- verifier que le SMS match bien le filtre (`targetSender`/`targetKeyword`),
+- verifier que la permission SMS est toujours accordee,
+- verifier logs `IncomingSmsReceiver`.
+
+## 14) Limite Android importante
+
+Le mode **Force stop** bloque receivers/services pour l'app jusqu'au prochain lancement manuel.
+C'est une regle Android systeme, pas un bug de votre code.
+
+## 15) Dependances
 
 - `another_telephony`
 - `permission_handler`
 - `sqflite`
 - `path`
-
-## Note
-
-Ce README decrit l'etat actuel du code dans cette branche locale.

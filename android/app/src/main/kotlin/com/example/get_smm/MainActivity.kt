@@ -27,6 +27,32 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "startKeepAliveService" -> {
+                    try {
+                        SmsKeepAliveService.start(applicationContext)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "START_KEEP_ALIVE_FAILED",
+                            e.message,
+                            null,
+                        )
+                    }
+                }
+
+                "stopKeepAliveService" -> {
+                    try {
+                        SmsKeepAliveService.stop(applicationContext)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "STOP_KEEP_ALIVE_FAILED",
+                            e.message,
+                            null,
+                        )
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }

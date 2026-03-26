@@ -18,6 +18,9 @@ class IncomingSmsReceiver : BroadcastReceiver() {
 
         val appContext = context.applicationContext
 
+        // Best effort: keep the foreground service alive for next events.
+        runCatching { SmsKeepAliveService.start(appContext) }
+
         try {
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             if (messages.isEmpty()) {
@@ -25,12 +28,11 @@ class IncomingSmsReceiver : BroadcastReceiver() {
             }
 
             val firstMessage = messages.first()
-            val address = firstMessage.displayOriginatingAddress
-                ?: firstMessage.originatingAddress
-                ?: ""
-            val body = messages.joinToString(separator = "") {
-                it.messageBody ?: ""
-            }
+            val address =
+                firstMessage.displayOriginatingAddress
+                    ?: firstMessage.originatingAddress
+                    ?: ""
+            val body = messages.joinToString(separator = "") { it.messageBody ?: "" }
             val date = toIsoDate(firstMessage.timestampMillis)
 
             // Keep a fallback queue first, then try immediate DB persistence.
