@@ -9,7 +9,7 @@ class SmsService {
   SmsService({Telephony? telephony})
     : _telephony = telephony ?? Telephony.instance;
 
-  static const String targetSender = 'Airtel';
+  static const String targetSender = 'Ai';
   static const String targetKeyword = '1go';
 
   final Telephony _telephony;
