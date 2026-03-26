@@ -1,35 +1,11 @@
-import 'package:another_telephony/telephony.dart';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'database_helper.dart';
 import 'sms_service.dart';
-
-@pragma('vm:entry-point')
-Future<void> backgroundSmsHandler(SmsMessage message) async {
-  final smsService = SmsService();
-  if (!smsService.isMatchingMessage(
-    address: message.address,
-    body: message.body,
-  )) {
-    return;
-  }
-
-  String dateIso;
-  final dynamic rawDate = message.date;
-  if (rawDate is DateTime) {
-    dateIso = rawDate.toIso8601String();
-  } else if (rawDate is int) {
-    dateIso = DateTime.fromMillisecondsSinceEpoch(rawDate).toIso8601String();
-  } else {
-    dateIso = DateTime.now().toIso8601String();
-  }
-
-  await DatabaseHelper().saveMessage(
-    address: message.address ?? '',
-    body: message.body ?? '',
-    date: dateIso,
-  );
-}
 
 void main() {
   runApp(const MyApp());
@@ -58,7 +34,12 @@ class SmsAutoRecoveryScreen extends StatefulWidget {
   State<SmsAutoRecoveryScreen> createState() => _SmsAutoRecoveryScreenState();
 }
 
-class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
+class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen>
+    with WidgetsBindingObserver {
+  static const MethodChannel _backgroundSmsChannel = MethodChannel(
+    'get_smm/background_sms',
+  );
+
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final SmsService _smsService = SmsService();
 
@@ -66,20 +47,40 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
   bool _isInitializing = true;
   bool _isListening = false;
   String _statusMessage = 'Initialisation...';
+  String _messagesSnapshot = '0';
+  Timer? _autoRefreshTimer;
+  int _recoveredFromNativeQueue = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeAutomaticRecovery();
   }
 
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshMessagesIfChanged());
+    }
+  }
+
   Future<void> _initializeAutomaticRecovery() async {
+    _recoveredFromNativeQueue = await _flushNativePendingSms();
+
     await _loadSavedMessages();
     if (!mounted) return;
 
     setState(() {
       _isInitializing = true;
-      _statusMessage = 'Vérification des permissions SMS...';
+      _statusMessage = 'Verification des permissions SMS...';
     });
 
     final hasPermission = await _smsService.ensureSmsPermissions();
@@ -90,7 +91,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
         _isInitializing = false;
         _isListening = false;
         _statusMessage =
-            'Permission SMS refusée. Active-la pour la récupération automatique.';
+            'Permission SMS refusee. Active-la pour la recuperation automatique.';
       });
       return;
     }
@@ -99,41 +100,66 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
       _statusMessage = 'Synchronisation des SMS existants...';
     });
 
-    final matchingMessages = await _smsService.getMatchingInboxMessages();
     int processedCount = 0;
-
-    for (final message in matchingMessages) {
-      await _dbHelper.saveMessage(
-        address: message['address']?.toString() ?? '',
-        body: message['body']?.toString() ?? '',
-        date: message['date']?.toString() ?? DateTime.now().toIso8601String(),
-      );
-      processedCount++;
+    try {
+      final matchingMessages = await _smsService.getMatchingInboxMessages();
+      for (final message in matchingMessages) {
+        await _dbHelper.saveMessage(
+          address: message['address']?.toString() ?? '',
+          body: message['body']?.toString() ?? '',
+          date: message['date']?.toString() ?? DateTime.now().toIso8601String(),
+        );
+        processedCount++;
+      }
+    } catch (e) {
+      debugPrint('Erreur de synchronisation initiale SMS: $e');
     }
 
     await _loadSavedMessages();
     if (!mounted) return;
 
-    _smsService.startIncomingListener(
-      onMatchingMessage: _handleIncomingMatch,
-      onBackgroundMessage: backgroundSmsHandler,
-    );
+    _smsService.startIncomingListener(onMatchingMessage: _handleIncomingMatch);
+    _startAutoRefresh();
 
     setState(() {
       _isInitializing = false;
       _isListening = true;
       _statusMessage =
-          'Écoute active: (automatique, foreground + background).';
+          'Ecoute active: app ouverte + capture native en arriere-plan.';
     });
 
-    if (processedCount > 0) {
+    final totalRecovered = processedCount + _recoveredFromNativeQueue;
+    if (totalRecovered > 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$processedCount SMS existants synchronisés.'),
+          content: Text('$totalRecovered SMS synchronises au lancement.'),
           backgroundColor: Colors.green,
         ),
       );
     }
+  }
+
+  Future<int> _flushNativePendingSms() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return 0;
+    }
+
+    try {
+      final flushed = await _backgroundSmsChannel.invokeMethod<int>(
+        'flushPendingSms',
+      );
+      return flushed ?? 0;
+    } catch (e) {
+      debugPrint('Impossible de vider la file native SMS: $e');
+      return 0;
+    }
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshMessagesIfChanged());
+    });
   }
 
   Future<void> _handleIncomingMatch(Map<String, dynamic> message) async {
@@ -143,12 +169,12 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
       date: message['date']?.toString() ?? DateTime.now().toIso8601String(),
     );
 
-    await _loadSavedMessages();
+    await _refreshMessagesIfChanged();
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Nouveau SMS sauvegardé automatiquement.'),
+        content: Text('Nouveau SMS sauvegarde automatiquement.'),
         backgroundColor: Colors.blue,
       ),
     );
@@ -156,11 +182,47 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
 
   Future<void> _loadSavedMessages() async {
     final messages = await _dbHelper.getMessages();
+    final filteredMessages = _applyActiveFilter(messages);
     if (!mounted) return;
 
     setState(() {
-      _savedMessages = messages;
+      _savedMessages = filteredMessages;
+      _messagesSnapshot = _buildSnapshot(filteredMessages);
     });
+  }
+
+  Future<void> _refreshMessagesIfChanged() async {
+    final messages = await _dbHelper.getMessages();
+    final filteredMessages = _applyActiveFilter(messages);
+    if (!mounted) return;
+
+    final snapshot = _buildSnapshot(filteredMessages);
+    if (snapshot == _messagesSnapshot) return;
+
+    setState(() {
+      _savedMessages = filteredMessages;
+      _messagesSnapshot = snapshot;
+    });
+  }
+
+  List<Map<String, dynamic>> _applyActiveFilter(
+    List<Map<String, dynamic>> messages,
+  ) {
+    return messages
+        .where(
+          (message) => _smsService.isMatchingMessage(
+            address: message['address']?.toString(),
+            body: message['body']?.toString(),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  String _buildSnapshot(List<Map<String, dynamic>> messages) {
+    if (messages.isEmpty) return '0';
+
+    final first = messages.first;
+    return '${messages.length}:${first['id'] ?? ''}:${first['date'] ?? ''}';
   }
 
   String _formatDate(String? dateStr) {
@@ -205,7 +267,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      _isListening ? 'Écoute automatique active' : 'En attente',
+                      _isListening ? 'Ecoute automatique active' : 'En attente',
                     ),
                     const Spacer(),
                     Text('Total: ${_savedMessages.length}'),
@@ -220,7 +282,7 @@ class _SmsAutoRecoveryScreenState extends State<SmsAutoRecoveryScreen> {
                 : _savedMessages.isEmpty
                 ? const Center(
                     child: Text(
-                      'Aucun SMS correspondant votre filtre sauvegardé.',
+                      'Aucun SMS correspondant a votre filtre sauvegarde.',
                       textAlign: TextAlign.center,
                     ),
                   )

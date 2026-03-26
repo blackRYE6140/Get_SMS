@@ -1,5 +1,5 @@
-import 'package:flutter/foundation.dart';
 import 'package:another_telephony/telephony.dart';
+import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 typedef MatchingSmsHandler =
@@ -9,8 +9,9 @@ class SmsService {
   SmsService({Telephony? telephony})
     : _telephony = telephony ?? Telephony.instance;
 
-  static const String targetSender = 'Airtel';
-  static const String targetKeyword = '1go';
+  // Keep lowercase because incoming text is normalized to lowercase.
+  static const String targetSender = 'salama';
+  static const String targetKeyword = 'salama';
 
   final Telephony _telephony;
 
@@ -27,7 +28,7 @@ class SmsService {
       final requested = await Permission.sms.request();
       return requested.isGranted;
     } catch (e) {
-      debugPrint('Impossible de vérifier la permission SMS: $e');
+      debugPrint('Impossible de verifier la permission SMS: $e');
       return false;
     }
   }
@@ -35,8 +36,13 @@ class SmsService {
   bool isMatchingMessage({String? address, String? body}) {
     final normalizedAddress = (address ?? '').toLowerCase();
     final normalizedBody = (body ?? '').toLowerCase();
-    return normalizedAddress.contains(targetSender) ||
-        normalizedBody.contains(targetKeyword);
+
+    final senderMatches =
+        targetSender.isNotEmpty && normalizedAddress.contains(targetSender);
+    final keywordMatches =
+        targetKeyword.isNotEmpty && normalizedBody.contains(targetKeyword);
+
+    return senderMatches || keywordMatches;
   }
 
   Future<List<Map<String, dynamic>>> getMatchingInboxMessages() async {
@@ -44,7 +50,7 @@ class SmsService {
 
     final hasPermission = await ensureSmsPermissions();
     if (!hasPermission) {
-      throw Exception('Permission SMS non accordée');
+      throw Exception('Permission SMS non accordee');
     }
 
     final inbox = await _telephony.getInboxSms(
@@ -62,16 +68,11 @@ class SmsService {
         .toList(growable: false);
   }
 
-  void startIncomingListener({
-    required MatchingSmsHandler onMatchingMessage,
-    MessageHandler? onBackgroundMessage,
-  }) {
+  void startIncomingListener({required MatchingSmsHandler onMatchingMessage}) {
     if (!_isAndroidSupported) return;
-    final listenInBackground = onBackgroundMessage != null;
 
     _telephony.listenIncomingSms(
-      listenInBackground: listenInBackground,
-      onBackgroundMessage: onBackgroundMessage,
+      listenInBackground: false,
       onNewMessage: (SmsMessage sms) async {
         final message = _toGenericMessage(sms);
         if (!isMatchingMessage(
